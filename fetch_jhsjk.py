@@ -6,19 +6,17 @@ import json
 import hashlib
 from pathlib import Path
 from datetime import datetime
-
 import requests
 from bs4 import BeautifulSoup
 
 # ================= 配置 =================
-TARGET_URL = "http://jhsjk.people.cn/result/88?else=501&form=701"
+# 换成了中国政府网“习近平系列重要讲话”专栏，无防爬，极其稳定
+TARGET_URL = "https://www.gov.cn/guoqing/xxps/index.htm"
 PUSHPLUS_URL = "https://www.pushplus.plus/send"
 STATE_FILE = Path("pushed_ids.json")
 
-# 🔥 关键修改：完全伪装成苹果手机浏览器，降低被封概率
 HEADERS = {
-    "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1",
-    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
     "Accept-Language": "zh-CN,zh;q=0.9",
 }
 # =======================================
@@ -45,31 +43,39 @@ def make_id(title: str, link: str) -> str:
 
 def fetch_articles() -> list:
     print(f"[INFO] 正在请求网页: {TARGET_URL}")
-    resp = requests.get(TARGET_URL, headers=HEADERS, timeout=30)
-    resp.raise_for_status()
-    resp.encoding = resp.apparent_encoding
-
-    # 🔥 诊断功能：如果抓不到东西，把网页前 100 个字符打印出来，看看是不是被拦截了
-    print(f"[DEBUG] 网页开头内容: {resp.text[:100].strip()}")
+    try:
+        resp = requests.get(TARGET_URL, headers=HEADERS, timeout=30)
+        resp.raise_for_status()
+        resp.encoding = resp.apparent_encoding
+    except Exception as e:
+        print(f"[ERROR] 网页请求失败: {e}")
+        return []
 
     soup = BeautifulSoup(resp.text, "html.parser")
     articles = []
     seen_links = set()
 
+    # 抓取页面中所有的链接
     for a_tag in soup.find_all("a", href=True):
         title = a_tag.get_text(strip=True)
         link = a_tag["href"].strip()
 
+        # 补全相对链接
         if link.startswith("//"):
-            link = "http:" + link
+            link = "https:" + link
         elif link.startswith("/"):
-            link = "http://jhsjk.people.cn" + link
+            link = "https://www.gov.cn" + link
+        elif link.startswith("./"):
+            link = "https://www.gov.cn/guoqing/xxps/" + link[2:]
 
-        if len(title) < 5:
+        # 过滤：标题太短或不是政府网链接的跳过
+        if len(title) < 10:
             continue
-        if "jhsjk.people.cn" not in link:
+        if "gov.cn" not in link:
             continue
-        if "/article/" not in link and "/n1/" not in link:
+            
+        # 过滤掉导航栏（比如“首页”、“网站地图”等）
+        if "index" in link and title in ["首页", "返回首页"]:
             continue
 
         if link in seen_links:
@@ -78,7 +84,8 @@ def fetch_articles() -> list:
         seen_links.add(link)
         articles.append({"title": title, "link": link, "id": make_id(title, link)})
 
-    return articles[:15]
+    # 只取最新的 10 条
+    return articles[:10]
 
 def push_to_wechat(token: str, new_articles: list) -> bool:
     if not new_articles:
@@ -89,14 +96,16 @@ def push_to_wechat(token: str, new_articles: list) -> bool:
         items_html += f'<p>{idx}. <a href="{art["link"]}" target="_blank">{art["title"]}</a></p>\n'
 
     content = (
-        f"<h3>人民网“习近平系列重要讲话数据库”有新内容</h3>\n"
+        f"<h3>政务网“重要讲话”专栏有新内容</h3>\n"
         f"<p>共 {len(new_articles)} 条新条目：</p>\n"
         f"{items_html}\n"
+        f"<hr>\n"
+        f"<p style='color:#888;font-size:12px;'>抓取时间：{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</p>"
     )
 
     payload = {
         "token": token,
-        "title": f"重要讲话数据库更新 · {len(new_articles)} 条新内容",
+        "title": f"重要讲话更新 · {len(new_articles)} 条新内容",
         "content": content,
         "template": "html",
     }
@@ -123,7 +132,11 @@ def main():
     print(f"[INFO] 已记录 {len(pushed_ids)} 条历史条目")
 
     articles = fetch_articles()
-    print(f"[INFO] 页面共提取到 {len(articles)} 条条目")
+    print(f"[INFO] 页面共提取到 {len(articles)} 条有效条目")
+
+    if len(articles) == 0:
+        print("[WARNING] 没有提取到任何条目，可能网页结构变了。")
+        return
 
     new_articles = [a for a in articles if a["id"] not in pushed_ids]
     
