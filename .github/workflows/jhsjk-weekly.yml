@@ -1,0 +1,39 @@
+name: 重要讲话数据库每周推送
+
+on:
+  schedule:
+    # 每周一 00:00 UTC = 北京时间每周一 08:00
+    - cron: '0 0 * * 1'
+  workflow_dispatch:  # 支持手动触发，方便调试
+
+jobs:
+  fetch-and-push:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: 检出仓库
+        uses: actions/checkout@v4
+
+      - name: 设置 Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: 安装依赖
+        run: |
+          python -m pip install --upgrade pip
+          pip install requests beautifulsoup4
+
+      - name: 执行抓取与推送
+        env:
+          PUSHPLUS_TOKEN: ${{ secrets.PUSHPLUS_TOKEN }}
+        run: python fetch_jhsjk.py
+
+      - name: 提交状态文件（去重记录）
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add pushed_ids.json 2>/dev/null || true
+          git diff --staged --quiet || git commit -m "chore: update pushed_ids [skip ci]"
+          git push 2>/dev/null || true
