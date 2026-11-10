@@ -50,7 +50,10 @@ def fetch_articles() -> list:
     except Exception as e:
         print(f"[ERROR] 网页请求失败: {e}")
         return []
-
+        
+    print(f"[DEBUG] 网页内容快照: {resp.text[:500]}")
+    articles = []
+    
     soup = BeautifulSoup(resp.text, "html.parser")
     articles = []
     seen_links = set()
