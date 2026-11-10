@@ -2,9 +2,8 @@ name: 重要讲话数据库每周推送
 
 on:
   schedule:
-    # 每周一 00:00 UTC = 北京时间每周一 08:00
     - cron: '0 0 * * 1'
-  workflow_dispatch:  # 支持手动触发，方便调试
+  workflow_dispatch:
 
 jobs:
   fetch-and-push:
